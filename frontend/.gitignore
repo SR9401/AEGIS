@@ -22,3 +22,5 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+/src
+/home/shakib/AEGIS/frontend/src.backup_20251022_1420
