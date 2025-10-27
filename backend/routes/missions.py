@@ -1,7 +1,7 @@
 from flask import Blueprint, request, jsonify, g
 from sqlalchemy.exc import IntegrityError
 
-from services.mission_service import create_mission, update_mission, delete_mission, get_missions
+from services.mission_service import create_mission, update_mission, delete_mission, get_missions, list_missions
 
 missions_bp = Blueprint("missions", __name__)
 
@@ -31,24 +31,19 @@ def create_mission_route():
     return jsonify(m.to_dict()), 201
 
 
-# GET /missions  (liste + filtres + pagination)
-"""@missions_bp.route("", methods=["GET"])
+@missions_bp.route("", methods=["GET"])
 def list_missions_route():
-    page = int(request.args.get("page", 1))
-    per_page = int(request.args.get("per_page", 20))
-    filters = {
-        "status": request.args.get("status"),
-        "date_from": request.args.get("date_from"),
-        "date_to": request.args.get("date_to"),
-    }
-    data = list_missions(g.db, filters, page=page, per_page=per_page, sort=request.args.get("sort", "date_desc"))
-    return jsonify({
-        "items": [m.to_dict() for m in data["items"]],
-        "meta": data["meta"]
-    }), 200
-"""
+    try:
+        params = request.args.to_dict()
+        result = list_missions(g.db, params)
+    except ValueError as e:
+        return jsonify({"error": "bad_request", "message": str(e)}), 400
+    except Exception:
+        return jsonify({"error": "internal_error", "message": "Erreur serveur."}), 500
+    return jsonify(result), 200
 
-# GET /missions/<id>
+
+
 @missions_bp.route("/<mission_id>", methods=["GET"])
 def get_mission_route(mission_id):
     m = get_missions(g.db, mission_id)
@@ -57,7 +52,6 @@ def get_mission_route(mission_id):
     return jsonify(m.to_dict()), 200
 
 
-# PATCH /missions/<id>
 @missions_bp.route("/<mission_id>", methods=["PATCH"])
 def patch_mission_route(mission_id):
     try:
@@ -71,7 +65,6 @@ def patch_mission_route(mission_id):
     return jsonify(m.to_dict()), 200
 
 
-# DELETE /missions/<id>
 @missions_bp.route("/<mission_id>", methods=["DELETE"])
 def delete_mission_route(mission_id):
     ok = delete_mission(g.db, mission_id, soft=True)

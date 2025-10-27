@@ -1,26 +1,66 @@
-# Logs
-logs
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual env
+.venv/
+venv/
+env/
+
+# Package build
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Caches & tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Notebooks
+.ipynb_checkpoints/
+
+# --- Flask / App ---
+# Secrets & local config
+.env
+.env.*
+*.secret
+*.key
+
+# Local DB (keep migrations, ignore real DB files)
+app.db
+*.sqlite
+*.sqlite3
+
+# Instance/var (if you use Flask instance folder)
+instance/
+var/
+tmp/
+logs/
 *.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
-*.local
+# Alembic (KEEP migrations, just ignore bytecode)
+alembic/*.pyc
+alembic/__pycache__/
 
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-.idea
+# Uploads (if you store files locally)
+uploads/
+media/
+
+# --- Editors & OS ---
+.vscode/
+.idea/
+*.iml
 .DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
-/src
-/home/shakib/AEGIS/frontend/src.backup_20251022_1420
+Thumbs.db
+
+# --- Front stuff (if any) ---
+node_modules/

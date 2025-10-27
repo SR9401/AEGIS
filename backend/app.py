@@ -9,8 +9,15 @@ from routes.assign import assign_bp
 from extensions import bcrypt 
 import os
 import config
+from flask_cors import CORS
 
 app = Flask(__name__)
+
+CORS(app, resources={r"/*": {"origins": "http://localhost:5174"}}, supports_credentials=False,
+     expose_headers=["Content-Type"], allow_headers=["Content-Type","Authorization","X-User-Id"])
+
+
+
 
 env = os.getenv("FLASK_ENV", "development")
 app.config.from_object(config.config.get(env, config.DevelopmentConfig))

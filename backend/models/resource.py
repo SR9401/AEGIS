@@ -1,26 +1,31 @@
-from models import BaseModel
-from sqlalchemy import Column, String, Enum, Text, DateTime, Float, ForeignKey
+from .models import BaseModel
+from sqlalchemy import Column, String, Text
+from sqlalchemy import Enum as SQLEnum  # alias pour éviter la confusion
 import enum
 
 
-class ResourceStatus(enum.Enum):
-
+class ResourceStatus(str, enum.Enum):
     AVAILABLE = 'available'
     ASSIGNED = 'assigned'
     MAINTENANCE = 'maintenance'
 
 
 class Resource(BaseModel):
-    """classe qui definit les ressources heriter de base model
-        socle commun des classes.
-    """
-    
+    """classe qui définit les ressources (hérite de BaseModel)."""
     __tablename__ = 'resources'
+
     type = Column(String(50), nullable=False)
     label = Column(String(120), nullable=False, unique=True)
-    status = Column(Enum(ResourceStatus), default=ResourceStatus.AVAILABLE, nullable=False)
+
+
+    status = Column(
+        SQLEnum(ResourceStatus, name="resource_status", native_enum=False, validate_strings=True),
+        default=ResourceStatus.AVAILABLE,
+        nullable=False
+    )
+
     details = Column(Text, nullable=True)
-     
+
     def to_dict(self):
         return {
             'id': self.id,
@@ -29,5 +34,5 @@ class Resource(BaseModel):
             'status': self.status.value,
             'details': self.details if self.details else None,
             'created_at': self.created_at.isoformat().replace("+00:00", "Z"),
-            'updated_at': self.updated_at.isoformat().replace("+00:00", "Z")
+            'updated_at': self.updated_at.isoformat().replace("+00:00", "Z"),
         }

@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
-
+from sqlalchemy import or_, asc, desc
 from models.mission import Mission, Status
 from models.user import User
 
@@ -61,21 +61,12 @@ def create_mission(session, payload: Dict[str, Any], created_by: str, *, verify_
     if not title or not str(title).strip():
         raise ValueError("title_required")
     title = str(title).strip()
-
-    
     description = payload.get("description")
-
-    # ---- status (normalisation)
     raw_status = payload.get("status")
     status_enum = _normalize_status(raw_status)
-
-    # ---- date (parse / normalize to UTC)
     parsed_date = _parse_iso_datetime(payload.get("date"))
-
-    # ---- lat / lon (exiger selon ton modèle)
     lat = payload.get("lat")
     lon = payload.get("lon")
-    # si ton modèle impose non-null, on exige ici
     if lat is None or lon is None:
         raise ValueError("lat_lon_required")
     try:
@@ -86,7 +77,6 @@ def create_mission(session, payload: Dict[str, Any], created_by: str, *, verify_
     if not (-90.0 <= lat <= 90.0) or not (-180.0 <= lon <= 180.0):
         raise ValueError("lat_lon_out_of_range")
 
-    # ---- vérifier le creator (optionnel)
     if verify_creator:
         user = session.query(User).filter_by(id=created_by).first()
         if not user:
@@ -118,8 +108,8 @@ def delete_mission(session, mission_id, soft=True):
     else:
         session.delete(m)
         session.flush()
-
     return True
+
 def update_mission(session, mission_id, patch_dict):
 
     m = session.query(Mission).filter_by(id=mission_id).first()
@@ -181,3 +171,100 @@ def update_mission(session, mission_id, patch_dict):
         m.save()
     session.flush()
     return m
+
+def list_missions(session, params: Optional[Dict[str, Any]] = None):
+    """
+    Retourne une page de missions filtrées selon `params`.
+    params possible:
+      - status: 'planned'|'active'|'done' (ou 'PLANNED' etc.)
+      - date_from: ISO datetime
+      - date_to: ISO datetime
+      - created_by: user id
+      - q: texte à chercher dans title ou description
+      - page: int (>=1)
+      - per_page: int
+      - sort_by: 'date' | 'created_at' | 'title' (default 'date')
+      - sort_dir: 'asc'|'desc' (default 'asc')
+    Retour:
+      { items: [mission_dict,...], total: int, page: int, per_page: int }
+    """
+    params = params or {}
+
+    # pagination & tri — sanitation minimale
+    try:
+        page = max(1, int(params.get("page", 1)))
+    except Exception:
+        page = 1
+    try:
+        per_page = int(params.get("per_page", 20))
+        per_page = max(1, min(200, per_page))  # limite raisonnable
+    except Exception:
+        per_page = 20
+
+    sort_by = params.get("sort_by", "date")
+    sort_dir = params.get("sort_dir", "asc").lower()
+    sort_dir_fn = asc if sort_dir != "desc" else desc
+
+    # début de la requête
+    q = session.query(Mission)
+
+    # filtre status
+    status_raw = params.get("status")
+    if status_raw is not None:
+        status_enum = _normalize_status(status_raw)
+        q = q.filter(Mission.status == status_enum)
+
+    # filtre dates
+    date_from_raw = params.get("date_from")
+    date_to_raw = params.get("date_to")
+    try:
+        if date_from_raw:
+            df = _parse_iso_datetime(date_from_raw)
+            q = q.filter(Mission.date >= df)
+        if date_to_raw:
+            dt = _parse_iso_datetime(date_to_raw)
+            q = q.filter(Mission.date <= dt)
+    except Exception:
+        raise ValueError("invalid_date")
+
+    # recherche texte sur title/description
+    search = params.get("q")
+    if search:
+        s = f"%{search.strip()}%"
+        q = q.filter(or_(Mission.title.ilike(s), Mission.description.ilike(s)))
+
+    # created_by filter
+    created_by = params.get("created_by")
+    if created_by:
+        q = q.filter(Mission.created_by == created_by)
+
+    # count total (avant pagination)
+    try:
+        total = q.count()
+    except Exception:
+        # fallback si count pose problème
+        total = len(q.all())
+
+    # tri
+    if sort_by == "created_at":
+        order_col = Mission.created_at
+    elif sort_by == "title":
+        order_col = Mission.title
+    else:
+        order_col = Mission.date
+
+    q = q.order_by(sort_dir_fn(order_col))
+
+    # pagination
+    offset = (page - 1) * per_page
+    items = q.offset(offset).limit(per_page).all()
+
+    # sérialisation en dict (utilise to_dict du modèle)
+    items_serialized = [m.to_dict() for m in items]
+
+    return {
+        "items": items_serialized,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+    }
