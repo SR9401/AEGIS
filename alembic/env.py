@@ -5,9 +5,9 @@ from sqlalchemy import engine_from_config, pool
 from alembic import context
 import os, sys
 
-BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))  # -> AEGIS/
-if BASE_DIR not in sys.path:
-    sys.path.insert(0, BASE_DIR)
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
 
 
 # --- Alembic config ---

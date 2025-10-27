@@ -1,4 +1,4 @@
-from .models import BaseModel
+from models.models import BaseModel
 from sqlalchemy import Column, String, Text, DateTime, Float, ForeignKey, Index
 from sqlalchemy import Enum as SQLEnum
 import enum

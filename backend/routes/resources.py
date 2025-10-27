@@ -1,10 +1,10 @@
 from flask import Blueprint, request, jsonify
 from sqlalchemy.exc import IntegrityError
-from backend.db import SessionLocal
-from backend.models import Resource, ResourceStatus
+from db import SessionLocal
+from models.resource import Resource, ResourceStatus
 # from backend.auth import jwt_required, current_user, require_roles  # si tu as déjà ces helpers
 
-bp_resources = Blueprint("resources", __name__, url_prefix="/resources")
+resources_bp = Blueprint("resources", __name__, url_prefix="/resources")
 
 def parse_status(value):
     if value is None:
@@ -14,7 +14,7 @@ def parse_status(value):
     except ValueError:
         return None
 
-@bp_resources.route("", methods=["POST"])
+@resources_bp.route("", methods=["POST"])
 # @jwt_required()
 # @require_roles("admin", "coordinator")
 def create_resource():
@@ -53,7 +53,7 @@ def create_resource():
     finally:
         db.close()
 
-@bp_resources.route("", methods=["GET"])
+@resources_bp.route("", methods=["GET"])
 # @jwt_required()
 def list_resources():
     db = SessionLocal()
@@ -72,7 +72,7 @@ def list_resources():
     finally:
         db.close()
 
-@bp_resources.route("/<rid>", methods=["GET"])
+@resources_bp.route("/<rid>", methods=["GET"])
 # @jwt_required()
 def get_resource(rid):
     db = SessionLocal()
@@ -84,7 +84,7 @@ def get_resource(rid):
     finally:
         db.close()
 
-@bp_resources.route("/<rid>", methods=["PATCH"])
+@resources_bp.route("/<rid>", methods=["PATCH"])
 # @jwt_required()
 # @require_roles("admin", "coordinator")
 def update_resource(rid):
@@ -125,7 +125,7 @@ def update_resource(rid):
     finally:
         db.close()
 
-@bp_resources.route("/<rid>", methods=["DELETE"])
+@resources_bp.route("/<rid>", methods=["DELETE"])
 # @jwt_required()
 # @require_roles("admin", "coordinator")
 def delete_resource(rid):

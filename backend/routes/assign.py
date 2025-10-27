@@ -1,12 +1,14 @@
 from flask import Blueprint, request, jsonify
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import func
-from backend.db import SessionLocal
-from backend.models import Mission, Resource, MissionResource, ResourceStatus
+from db import SessionLocal
+from models.mission import Mission
+from models.resource import Resource, ResourceStatus
+from models.mission_resource import MissionResource
 
-bp_assign = Blueprint("assign", __name__, url_prefix="/assign")
+assign_bp = Blueprint("assign", __name__, url_prefix="/assign")
 
-@bp_assign.route("", methods=["POST"])
+@assign_bp.route("", methods=["POST"])
 # @jwt_required()
 # @require_roles("admin", "coordinator")
 def assign_resource():
@@ -64,7 +66,7 @@ def assign_resource():
     finally:
         db.close()
 
-@bp_assign.route("/mission/<mid>", methods=["GET"])
+@assign_bp.route("/mission/<mid>", methods=["GET"])
 # @jwt_required()
 def list_assignments_for_mission(mid):
     db = SessionLocal()
@@ -74,7 +76,7 @@ def list_assignments_for_mission(mid):
     finally:
         db.close()
 
-@bp_assign.route("/<aid>", methods=["PATCH"])
+@assign_bp.route("/<aid>", methods=["PATCH"])
 # @jwt_required()
 # @require_roles("admin", "coordinator")
 def update_assignment(aid):
@@ -115,7 +117,7 @@ def update_assignment(aid):
     finally:
         db.close()
 
-@bp_assign.route("/<aid>", methods=["DELETE"])
+@assign_bp.route("/<aid>", methods=["DELETE"])
 # @jwt_required()
 # @require_roles("admin", "coordinator")
 def delete_assignment(aid):

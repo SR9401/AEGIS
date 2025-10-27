@@ -5,6 +5,7 @@ import uuid
 import jwt
 from extensions import bcrypt
 from models.user import User
+from db import SessionLocal
 
 auth_bp = Blueprint("auth", __name__)
 
