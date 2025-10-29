@@ -1,146 +1,131 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g, current_app
+from http import HTTPStatus
 from sqlalchemy.exc import IntegrityError
-from db import SessionLocal
 from models.resource import Resource, ResourceStatus
-# from backend.auth import jwt_required, current_user, require_roles  # si tu as déjà ces helpers
+from authz import require_auth, require_roles
 
-resources_bp = Blueprint("resources", __name__, url_prefix="/resources")
+resources_bp = Blueprint("resource", __name__)
 
-def parse_status(value):
-    if value is None:
-        return None
+def _parse_status(value: str | None) -> ResourceStatus:
+    if not value:
+        return ResourceStatus.AVAILABLE
     try:
-        return ResourceStatus(value)
-    except ValueError:
-        return None
+        return ResourceStatus(value.strip().lower())
+    except Exception:
+        raise ValueError("invalid_status")
 
 @resources_bp.route("", methods=["POST"])
-# @jwt_required()
-# @require_roles("admin", "coordinator")
-def create_resource():
-    data = request.get_json(force=True) or {}
-    required = ["name", "type"]
-    missing = [k for k in required if not data.get(k)]
-    if missing:
-        return jsonify({"error": f"Missing fields: {', '.join(missing)}"}), 400
-
-    status = parse_status(data.get("status")) or ResourceStatus.AVAILABLE
+@require_roles("admin","coordinator")
+def create_resource_route():
     try:
-        quantity = float(data.get("quantity", 1.0))
-        if quantity < 0:
-            raise ValueError()
+        data = request.get_json(force=True) or {}
     except Exception:
-        return jsonify({"error": "quantity must be a non-negative number"}), 400
+        return jsonify({"error": "bad_request", "message": "Payload JSON invalide."}), HTTPStatus.BAD_REQUEST
 
-    db = SessionLocal()
+    # ✅ label officiel ; on tolère "name" pour compat
+    label = (data.get("label") or data.get("name") or "").strip()
+    rtype = (data.get("type") or "").strip()
+    if not rtype or not label:
+        missing = []
+        if not rtype: missing.append("type")
+        if not label: missing.append("label")  # <— pas "name"
+        return jsonify({"error": f"Missing fields: {', '.join(missing)}"}), HTTPStatus.BAD_REQUEST
+
     try:
-        r = Resource(
-            name=data["name"].strip(),
-            type=data["type"].strip(),
-            quantity=quantity,
-            unit=(data.get("unit") or None),
-            status=status,
-            location=(data.get("location") or None),
-            created_by=(data.get("created_by") or "system"),  # remplace par current_user.id si tu as JWT
-        )
-        db.add(r)
-        db.commit()
-        db.refresh(r)
-        return jsonify(r.to_dict()), 201
-    except IntegrityError as e:
-        db.rollback()
-        return jsonify({"error": "Integrity error", "detail": str(e)}), 409
-    finally:
-        db.close()
+        status = _parse_status(data.get("status"))
+    except ValueError:
+        return jsonify({"error": "invalid_status", "message": "Status invalide (available|assigned|maintenance)"}), 400
+
+    res = Resource(type=rtype, label=label, status=status, details=data.get("details"))
+    try:
+        g.db.add(res)
+        g.db.flush()  # commit géré ailleurs si tu as un teardown ; sinon g.db.commit()
+    except IntegrityError:
+        g.db.rollback()
+        return jsonify({"error": "conflict", "message": "label déjà utilisé"}), 409
+    except Exception:
+        current_app.logger.exception("Erreur création ressource")
+        return jsonify({"error": "internal_error"}), 500
+
+    return jsonify(res.to_dict()), HTTPStatus.CREATED
 
 @resources_bp.route("", methods=["GET"])
-# @jwt_required()
-def list_resources():
-    db = SessionLocal()
+@require_auth
+def list_resources_route():
+    status_q = request.args.get("status")
+    type_q = request.args.get("type")
+    label_q = request.args.get("label")
+    q = g.db.query(Resource)
     try:
-        q = db.query(Resource)
-        if "status" in request.args:
-            st = parse_status(request.args.get("status"))
-            if st:
-                q = q.filter(Resource.status == st)
-        if "type" in request.args:
-            q = q.filter(Resource.type == request.args["type"])
-        if "name" in request.args:
-            q = q.filter(Resource.name.ilike(f"%{request.args['name']}%"))
-        items = [r.to_dict() for r in q.all()]
-        return jsonify(items), 200
-    finally:
-        db.close()
+        if status_q:
+            q = q.filter(Resource.status == _parse_status(status_q))
+    except ValueError:
+        return jsonify({"error": "invalid_status"}), 400
+    if type_q:
+        q = q.filter(Resource.type == type_q)
+    if label_q:
+        q = q.filter(Resource.label.ilike(f"%{label_q}%"))
+    items = [r.to_dict() for r in q.order_by(Resource.created_at.desc()).all()]
+    return jsonify(items), 200
 
 @resources_bp.route("/<rid>", methods=["GET"])
-# @jwt_required()
-def get_resource(rid):
-    db = SessionLocal()
-    try:
-        r = db.get(Resource, rid)
-        if not r:
-            return jsonify({"error": "Resource not found"}), 404
-        return jsonify(r.to_dict()), 200
-    finally:
-        db.close()
+@require_auth
+def get_resource_route(rid):
+    r = g.db.get(Resource, rid)
+    if not r:
+        return jsonify({"error": "not_found"}), 404
+    return jsonify(r.to_dict()), 200
 
 @resources_bp.route("/<rid>", methods=["PATCH"])
-# @jwt_required()
-# @require_roles("admin", "coordinator")
-def update_resource(rid):
-    data = request.get_json(force=True) or {}
-    db = SessionLocal()
+@require_roles("admin","coordinator")
+def update_resource_route(rid):
     try:
-        r = db.get(Resource, rid)
-        if not r:
-            return jsonify({"error": "Resource not found"}), 404
+        data = request.get_json(force=True) or {}
+    except Exception:
+        return jsonify({"error": "bad_request"}), 400
 
-        if "name" in data and data["name"]:
-            r.name = data["name"].strip()
-        if "type" in data and data["type"]:
-            r.type = data["type"].strip()
-        if "quantity" in data:
-            try:
-                qv = float(data["quantity"])
-                if qv < 0:
-                    raise ValueError()
-                r.quantity = qv
-            except Exception:
-                return jsonify({"error": "quantity must be a non-negative number"}), 400
-        if "unit" in data:
-            r.unit = data["unit"] or None
-        if "status" in data:
-            st = parse_status(data["status"])
-            if not st:
-                return jsonify({"error": "invalid status"}), 400
-            r.status = st
-        if "location" in data:
-            r.location = data["location"] or None
+    r = g.db.get(Resource, rid)
+    if not r:
+        return jsonify({"error": "not_found"}), 404
 
-        r.save()
-        db.add(r)
-        db.commit()
-        db.refresh(r)
-        return jsonify(r.to_dict()), 200
-    finally:
-        db.close()
+    if "type" in data and data["type"] is not None:
+        r.type = str(data["type"]).strip() or r.type
+
+    if "label" in data or "name" in data:
+        new_label = (data.get("label") or data.get("name") or "").strip()
+        if not new_label:
+            return jsonify({"error": "bad_request", "message": "label ne peut pas être vide"}), 400
+        r.label = new_label
+
+    if "status" in data:
+        try:
+            r.status = _parse_status(data.get("status"))
+        except ValueError:
+            return jsonify({"error": "invalid_status"}), 400
+
+    if "details" in data:
+        r.details = data.get("details")
+
+    try:
+        g.db.flush()
+    except IntegrityError:
+        g.db.rollback()
+        return jsonify({"error": "conflict", "message": "label déjà utilisé"}), 409
+    return jsonify(r.to_dict()), 200
 
 @resources_bp.route("/<rid>", methods=["DELETE"])
-# @jwt_required()
-# @require_roles("admin", "coordinator")
-def delete_resource(rid):
-    db = SessionLocal()
+@require_roles("admin","coordinator")
+def delete_resource_route(rid):
+    r = g.db.get(Resource, rid)
+    if not r:
+        return jsonify({"error": "not_found"}), 404
+
+    # TODO: bloquer si assignée (si tu veux)
     try:
-        r = db.get(Resource, rid)
-        if not r:
-            return jsonify({"error": "Resource not found"}), 404
-
-        # TODO: bloquer si ressource encore assignée (MissionResource existe)
-        # count = db.query(MissionResource).filter_by(resource_id=rid).count()
-        # if count > 0: return jsonify({"error": "Resource is assigned"}), 409
-
-        db.delete(r)
-        db.commit()
-        return jsonify({"ok": True}), 200
-    finally:
-        db.close()
+        g.db.delete(r)
+        g.db.flush()
+    except Exception:
+        g.db.rollback()
+        current_app.logger.exception("Erreur suppression ressource")
+        return jsonify({"error": "internal_error"}), 500
+    return jsonify({"ok": True}), 200

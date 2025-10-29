@@ -1,12 +1,22 @@
 from flask import Blueprint, request, jsonify, g
 from sqlalchemy.exc import IntegrityError
-
+from authz import require_auth, require_roles
 from services.mission_service import create_mission, update_mission, delete_mission, get_missions, list_missions
+from routes.assign import create_assignment
 
 missions_bp = Blueprint("missions", __name__)
 
+
+@missions_bp.route("/<mid>/assign", methods=["POST"])
+@require_roles("admin","coordinator")
+def assign_resource_alias(mid):
+    data = request.get_json(force=True) or {}
+    data["mission_id"] = mid
+    
+    return create_assignment()
 # POST /missions
 @missions_bp.route("", methods=["POST"])
+@require_roles("admin","coordinator")
 def create_mission_route():
     try:
         payload = request.get_json(force=True)
@@ -32,6 +42,7 @@ def create_mission_route():
 
 
 @missions_bp.route("", methods=["GET"])
+@require_auth
 def list_missions_route():
     try:
         params = request.args.to_dict()
@@ -45,6 +56,7 @@ def list_missions_route():
 
 
 @missions_bp.route("/<mission_id>", methods=["GET"])
+@require_auth
 def get_mission_route(mission_id):
     m = get_missions(g.db, mission_id)
     if not m:
@@ -53,6 +65,7 @@ def get_mission_route(mission_id):
 
 
 @missions_bp.route("/<mission_id>", methods=["PATCH"])
+@require_roles("admin","coordinator")
 def patch_mission_route(mission_id):
     try:
         payload = request.get_json(force=True)
@@ -66,6 +79,7 @@ def patch_mission_route(mission_id):
 
 
 @missions_bp.route("/<mission_id>", methods=["DELETE"])
+@require_roles("admin","coordinator")
 def delete_mission_route(mission_id):
     ok = delete_mission(g.db, mission_id, soft=True)
     if not ok:

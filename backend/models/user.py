@@ -20,7 +20,7 @@ class User(BaseModel):
     last_name = Column(String(50), nullable=False)
     email = Column(String(120), nullable=False, unique=True)
     password_hash = Column(String(128), nullable=False)
-    role = Column(SQLEnum(Role, name="user_role", native_enum=True), default=Role.OBSERVER, nullable=False)
+    role = Column(SQLEnum(Role, name="user_role", native_enum=False), default=Role.OBSERVER, nullable=False)
 
     def to_dict(self):
         return {

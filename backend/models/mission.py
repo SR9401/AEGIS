@@ -18,7 +18,7 @@ class Mission(BaseModel):
 
     title = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
-    status = Column(SQLEnum(Status, name="mission_status", native_enum=True), default=Status.PLANNED, nullable=False)
+    status = Column(SQLEnum(Status, name="mission_status", native_enum=False), default=Status.PLANNED, nullable=False)
     date = Column(DateTime(timezone=True), nullable=True)
     lat = Column(Float, nullable=True)
     lon = Column(Float, nullable=True)

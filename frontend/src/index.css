@@ -1,3 +1,5 @@
+@import "tailwindcss";
+
 .login-page {
   min-height: calc(100vh - 0px);
   display: flex;

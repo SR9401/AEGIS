@@ -5,96 +5,63 @@ import uuid
 import jwt
 from extensions import bcrypt
 from models.user import User
-from db import SessionLocal
 
 auth_bp = Blueprint("auth", __name__)
 
+def _json_error(code: int, error: str, message: str):
+    return jsonify({"error": error, "message": message}), code
 
 @auth_bp.route("/login", methods=["POST"])
 def login():
     """
     POST /auth/login
-    Body attendu : { "email": "...", "password": "..." }
-    Réponse : { access_token, token_type, expires_in, user }
+    Body: { "email": "...", "password": "..." }
+    Response: { access_token, token_type, expires_in, user }
     """
-    # -------------------------
-    # 1) Lecture et validation basique du JSON
-    # -------------------------
-    # - get_json(force=True) force la lecture du body comme JSON.
-    # - Si le body n'est pas du JSON valide, renvoyer 400.
+    # 1) Lire le payload JSON
     try:
         payload = request.get_json(force=True)
     except Exception:
-        return jsonify({"error": "bad_request", "message": "Payload invalide."}), 400
+        return _json_error(400, "bad_request", "Payload invalide (JSON attendu).")
 
-    # Récupérer email et mot de passe depuis le payload.
-    # Normaliser l'email : supprimer les espaces et mettre en minuscules.
     email = (payload.get("email") or "").strip().lower()
     password = payload.get("password") or ""
 
-    # Vérifier que l'email et le mot de passe sont fournis.
     if not email or not password:
-        return jsonify({"error": "bad_request", "message": "email et password requis."}), 400
+        return _json_error(400, "bad_request", "email et password requis.")
 
-    # -------------------------
-    # 2) Récupérer la session DB
-    # -------------------------
-    # La session est ouverte dans app.before_request et stockée dans g.db.
-    session = g.get("db")
+    # 2) Récupérer la session DB (fourni par app.before_request)
+    session = getattr(g, "db", None)
     if session is None:
-        # Si la session n'existe pas, c'est une erreur serveur.
-        return jsonify({"error": "internal_error", "message": "DB session non initialisée."}), 500
+        return _json_error(500, "internal_error", "DB session non initialisée.")
 
-    # -------------------------
-    # 3) Recherche de l'utilisateur en base
-    # -------------------------
-    # - Chercher l'utilisateur par email (stocké en lowercase dans la base).
-    # - Ne pas dire si l'email n'existe pas (message générique pour la sécurité).
+    # 3) Chercher l'utilisateur
     user = session.query(User).filter_by(email=email).first()
-    invalid_resp = ({"error": "invalid_credentials", "message": "Identifiants invalides."}, 401)
-
+    invalid_resp = _json_error(401, "invalid_credentials", "Identifiants invalides.")
     if not user:
-        # Email inconnu -> renvoyer message générique.
         return invalid_resp
 
-    # -------------------------
-    # 4) Vérification du mot de passe
-    # -------------------------
-    # - bcrypt.check_password_hash(attendu_hash, mot_de_passe_en_clair)
-    # - Si la vérification échoue, renvoyer le même message générique.
+    # 4) Vérifier le mot de passe
     try:
         ok = bcrypt.check_password_hash(user.password_hash, password)
     except Exception:
-        # Si bcrypt plante pour une raison inattendue, traiter comme un échec d'authentification.
         return invalid_resp
-
     if not ok:
-        # Mot de passe incorrect.
         return invalid_resp
 
-    # -------------------------
-    # 5) Vérifier que le compte est actif (si le champ existe)
-    # -------------------------
-    # - Si le modèle a is_active et que le compte est désactivé, bloquer l'accès.
+    # 5) Compte actif (si champ présent)
     if hasattr(user, "is_active") and not user.is_active:
-        return jsonify({"error": "forbidden", "message": "Compte inactif."}), 403
+        return _json_error(403, "forbidden", "Compte inactif.")
 
-    # -------------------------
     # 6) Construire le JWT
-    # -------------------------
-    # - iat = issued at, exp = expiration, jti = identifiant unique du token
-    _raw_role = getattr(user, "role", None)
-    if isinstance(_raw_role, Enum):
-        # Enum Python -> utiliser name (ou .value si tu stockes des valeurs utiles)
-        role_str = _raw_role.name
-    elif hasattr(_raw_role, "value"):
-        # SQLAlchemy Enum wrapper parfois expose .value
-        role_str = str(_raw_role.value)
+    raw_role = getattr(user, "role", None)
+    if isinstance(raw_role, Enum):
+        role_str = raw_role.value if hasattr(raw_role, "value") else raw_role.name
     else:
-        role_str = str(_raw_role) if _raw_role is not None else None
+        role_str = str(raw_role) if raw_role is not None else None
 
     now = datetime.now(timezone.utc)
-    ttl = int(current_app.config.get("JWT_EXPIRES_IN", 900))
+    ttl = int(current_app.config.get("JWT_EXPIRES_IN", 12 * 3600))  # 12h par défaut
     exp = now + timedelta(seconds=ttl)
 
     claims = {
@@ -105,35 +72,61 @@ def login():
         "jti": str(uuid.uuid4()),
     }
 
-    # récupérer le secret depuis la config de l'app (fallback sur JWT_SECRET si présent)
     secret = current_app.config.get("JWT_SECRET_KEY") or current_app.config.get("JWT_SECRET")
     if not secret:
-        # en dev on peut renvoyer une 500 claire ; en prod on devrait fail-fast à l'initialisation
-        return jsonify({"error": "internal_error", "message": "JWT secret non configuré."}), 500
-
+        return _json_error(500, "internal_error", "JWT secret non configuré.")
     algo = current_app.config.get("JWT_ALGO", "HS256")
-    # signer le token (PyJWT peut renvoyer str ou bytes selon la version)
+
     token = jwt.encode(claims, secret, algorithm=algo)
-    # PyJWT v1 renvoyait bytes, v2 renvoie str — normaliser en str pour la réponse JSON
     if isinstance(token, bytes):
         token = token.decode("utf-8")
 
-
-    # préparer le snapshot utilisateur (role aussi en string)
     user_snapshot = {
         "id": str(user.id),
         "first_name": getattr(user, "first_name", None),
         "last_name": getattr(user, "last_name", None),
         "role": role_str,
+        "email": user.email,
     }
-    resp = {
+
+    return jsonify({
         "access_token": token,
         "token_type": "Bearer",
         "expires_in": ttl,
         "user": user_snapshot,
-    }
+    }), 200
 
-    # -------------------------
-    # 9) Retourner la réponse
-    # -------------------------
-    return jsonify(resp), 200
+
+# ----------- Endpoint de vérification du token -------------
+@auth_bp.route("/me", methods=["GET"])
+def me():
+    """
+    GET /auth/me
+    Header: Authorization: Bearer <token>
+    -> Retourne les claims + un snapshot user
+    """
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        return _json_error(401, "unauthorized", "Header Authorization Bearer manquant.")
+
+    token = auth.split(" ", 1)[1].strip()
+    secret = current_app.config.get("JWT_SECRET_KEY") or current_app.config.get("JWT_SECRET")
+    if not secret:
+        return _json_error(500, "internal_error", "JWT secret non configuré.")
+    algo = current_app.config.get("JWT_ALGO", "HS256")
+
+    try:
+        claims = jwt.decode(token, secret, algorithms=[algo])
+    except jwt.ExpiredSignatureError:
+        return _json_error(401, "token_expired", "Le token a expiré.")
+    except jwt.InvalidTokenError:
+        return _json_error(401, "invalid_token", "Token invalide.")
+
+    # Optionnel: recharger l'utilisateur pour renvoyer un snapshot
+    session = getattr(g, "db", None)
+    user = session.get(User, claims.get("sub")) if session else None
+
+    return jsonify({
+        "claims": claims,
+        "user": user.to_dict() if user else None
+    }), 200
