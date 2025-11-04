@@ -74,6 +74,7 @@ def create_mission():
         return jsonify({"error": "bad_request", "message": "title requis"}), 400
 
     description = data.get("description")
+
     try:
         status = _parse_status(data.get("status")) or Status.PLANNED
     except ValueError:
@@ -90,9 +91,8 @@ def create_mission():
     except ValueError:
         return jsonify({"error": "bad_request", "message": "lat/lon doivent être numériques"}), 400
 
-    created_by = (data.get("created_by") or "").strip()
-    if not created_by:
-        return jsonify({"error": "bad_request", "message": "created_by requis"}), 400
+    if not getattr(g, "user_id", None):
+        return jsonify({"error": "unauthorized"}), 401
 
     m = Mission(
         title=title,
@@ -101,7 +101,7 @@ def create_mission():
         date=date,
         lat=lat,
         lon=lon,
-        created_by=created_by,
+        created_by=g.user_id,
     )
     try:
         g.db.add(m)
@@ -226,12 +226,6 @@ def update_mission(mid):
             m.lon = _float_or_none(data.get("lon"))
         except ValueError:
             return jsonify({"error": "bad_request", "message": "lon invalide"}), 400
-
-    if "created_by" in data:
-        cb = (data.get("created_by") or "").strip()
-        if not cb:
-            return jsonify({"error": "bad_request", "message": "created_by ne peut pas être vide"}), 400
-        m.created_by = cb
 
     try:
         g.db.flush()
