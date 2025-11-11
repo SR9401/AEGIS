@@ -87,17 +87,6 @@ export default function Dashboard() {
                 </div>
               )}
 
-              <div className="bg-slate-900/60 border border-white/10 rounded-xl p-4">
-                <div className="text-slate-300 text-sm mb-2">Mission Overview</div>
-                <div className="h-40 rounded-lg bg-slate-800/40 border border-white/10 flex items-center justify-center text-slate-500">
-                  (Chart placeholder)
-                </div>
-                <div className="mt-2 text-[12px] text-slate-500 space-y-1">
-                  <div className="flex justify-between"><span>Active Missions</span><span>{stats.active}</span></div>
-                  <div className="flex justify-between"><span>Critical Operations</span><span>{stats.critical}</span></div>
-                </div>
-              </div>
-
               {/* Operations Map */}
               <div className="bg-slate-900/60 border border-white/10 rounded-xl p-4">
                 <div className="text-slate-300 text-sm mb-2">Operations Map</div>

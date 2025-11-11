@@ -3,6 +3,7 @@ import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import MissionsPage from "./pages/Missions";
 import ResourcesPage from "./pages/Resources.jsx";
+import Landing from "./pages/Landing";
 
 
 
@@ -16,6 +17,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
+		<Route path="/landing" element={<Landing />} />
         <Route path="/login" element={<Login/>} />
         <Route path="/dashboard" element={<Protected><Dashboard/></Protected>} />
 		<Route path="/missions" element={<Protected><MissionsPage/></Protected>} />

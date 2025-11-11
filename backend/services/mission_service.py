@@ -92,7 +92,6 @@ def create_mission(session, payload: Dict[str, Any], created_by: str, *, verify_
         created_by=created_by,
     )
     session.add(m)
-    # flush permet d'obtenir m.id si nécessaire, sans committer
     session.flush()
     return m
 
