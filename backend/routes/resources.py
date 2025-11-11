@@ -3,7 +3,8 @@ from http import HTTPStatus
 from sqlalchemy.exc import IntegrityError
 from models.resource import Resource, ResourceStatus
 from authz import require_auth, require_roles
-
+from sqlalchemy import exists
+from models.mission_resource import MissionResource
 resources_bp = Blueprint("resource", __name__)
 
 def _parse_status(value: str | None) -> ResourceStatus:
@@ -115,17 +116,23 @@ def update_resource_route(rid):
 
 @resources_bp.route("/<rid>", methods=["DELETE"])
 @require_roles("admin","coordinator")
-def delete_resource_route(rid):
+@require_roles("admin", "coordinator")
+def delete_resource(rid):
     r = g.db.get(Resource, rid)
     if not r:
         return jsonify({"error": "not_found"}), 404
 
-    # TODO: bloquer si assignée (si tu veux)
+    # Refuser la suppression si encore assignée à au moins une mission
+    is_linked = g.db.query(
+        exists().where(MissionResource.resource_id == rid)
+    ).scalar()
+    if is_linked or r.status == ResourceStatus.ASSIGNED:
+        return jsonify({"error": "conflict", "message": "Resource still assigned to a mission."}), 409
+
     try:
         g.db.delete(r)
         g.db.flush()
+        return jsonify({"ok": True}), 200
     except Exception:
         g.db.rollback()
-        current_app.logger.exception("Erreur suppression ressource")
         return jsonify({"error": "internal_error"}), 500
-    return jsonify({"ok": True}), 200

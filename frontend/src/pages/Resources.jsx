@@ -1,50 +1,37 @@
+// src/pages/Resources.jsx
 import { useEffect, useState } from "react";
 import Sidebar from "../components/Sidebar";
 import Topbar from "../components/Topbar";
 import { fetchResources, deleteResource } from "../api/resources";
-import ResourceForm from "../components/ResourceForm";
-
-function Row({ r, onDelete }) {
-  const pill =
-    r.status === "available"   ? "bg-emerald-500/20 text-emerald-300 border-emerald-400/20" :
-    r.status === "maintenance" ? "bg-amber-500/20 text-amber-300 border-amber-400/20" :
-                                 "bg-slate-500/20 text-slate-300 border-slate-400/20";
-  return (
-    <div className="flex items-center justify-between bg-slate-900/60 border border-white/10 rounded-xl p-4">
-      <div>
-        <div className="text-white font-medium">{r.label}</div>
-        <div className="text-slate-400 text-sm">{r.type} • {r.details || "—"}</div>
-      </div>
-      <div className="flex items-center gap-3">
-        <span className={`text-[11px] px-2 py-1 rounded-lg border ${pill}`}>{r.status}</span>
-        <button onClick={()=>onDelete(r.id)} className="px-3 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white">Delete</button>
-      </div>
-    </div>
-  );
-}
+import ResourceEditModal from "../components/ResourceEditModal";
+import AssignModal from "../components/AssignModal";
+import ResourceCreateModal from "../components/ResourceCreateModal";
 
 export default function ResourcesPage() {
   const [items, setItems] = useState([]);
-  const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState("");
+
+  const [editItem, setEditItem] = useState(null);
+  const [assignIds, setAssignIds] = useState(null); // array de resourceIds (single ou bulk)
+  const [selected, setSelected] = useState([]);     // pour bulk assign
+  const [openCreate, setOpenCreate] = useState(false);
 
   async function load() {
-    setErr(""); setLoading(true);
+    setLoading(true);
     try {
-      const data = await fetchResources({ page:1, limit:50 });
-      setItems(data);
-    } catch (e) {
-      setErr(e?.response?.data?.message || "Failed to load resources.");
-    } finally { setLoading(false); }
+      const res = await fetchResources({ page: 1, limit: 200 });
+      setItems(res.items ?? res);
+    } finally {
+      setLoading(false);
+    }
   }
 
-  useEffect(()=>{ load(); }, []);
+  useEffect(() => { load(); }, []);
 
-  async function onDelete(id) {
-    if (!confirm("Delete this resource?")) return;
-    await deleteResource(id);
-    setItems(prev => prev.filter(x => x.id !== id));
+  function toggleSelect(id) {
+    setSelected(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
   }
 
   return (
@@ -52,36 +39,123 @@ export default function ResourcesPage() {
       <Sidebar />
       <main className="flex-1 flex flex-col">
         <Topbar />
-        <div className="p-4 md:p-6">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h2 className="text-xl font-semibold">Resources</h2>
-              <p className="text-slate-400 text-sm">Manage operational assets</p>
+
+        <div className="p-4 md:p-6 space-y-4">
+          {/* Header actions */}
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-semibold">Resources</h2>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setOpenCreate(true)}
+                className="px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500"
+              >
+                New Resource
+              </button>
             </div>
-            <button onClick={()=>setShowForm(true)}
-              className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium">
-              + New Resource
-            </button>
           </div>
 
-          {err && <div className="mb-3 text-sm text-red-400">{err}</div>}
-
-          {loading ? (
-            <div className="text-slate-400">Loading…</div>
-          ) : items.length === 0 ? (
-            <div className="text-slate-400">No resources yet.</div>
-          ) : (
-            <div className="space-y-3">
-              {items.map(r => <Row key={r.id} r={r} onDelete={onDelete} />)}
-            </div>
-          )}
+          {/* Table */}
+          <div className="bg-slate-900/60 border border-white/10 rounded-xl overflow-hidden">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-slate-900/70 text-slate-300">
+                <tr>
+                  <th className="px-4 py-3 w-10"></th>
+                  <th className="px-4 py-3">Label</th>
+                  <th className="px-4 py-3">Type</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">Details</th>
+                  <th className="px-4 py-3 w-56">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/10">
+                {loading ? (
+                  <tr>
+                    <td className="px-4 py-4 text-slate-400" colSpan={6}>Loading…</td>
+                  </tr>
+                ) : items.length === 0 ? (
+                  <tr>
+                    <td className="px-4 py-4 text-slate-400" colSpan={6}>No resources.</td>
+                  </tr>
+                ) : (
+                  items.map((r) => {
+                    const isAssigned = String(r.status).toLowerCase() === "assigned";
+                    return (
+                      <tr key={r.id} className="hover:bg-slate-800/30">
+                        <td className="px-4 py-3">
+                          <input
+                            type="checkbox"
+                            checked={selected.includes(r.id)}
+                            onChange={() => toggleSelect(r.id)}
+                          />
+                        </td>
+                        <td className="px-4 py-3">{r.label}</td>
+                        <td className="px-4 py-3 text-slate-300">{r.type}</td>
+                        <td className="px-4 py-3 text-slate-400">{r.status}</td>
+                        <td className="px-4 py-3 text-slate-400">{r.details || "—"}</td>
+                        <td className="px-4 py-3">
+                          <div className="flex gap-2">
+                            <button
+                              className="px-3 py-1.5 rounded-lg border border-white/10 bg-slate-800/40 hover:bg-slate-800"
+                              onClick={() => setEditItem(r)}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500"
+                              onClick={() => setAssignIds([r.id])}
+                            >
+                              Assign
+                            </button>
+                            <button
+                              className="px-3 py-1.5 rounded-lg border border-red-500/30 text-red-300 bg-red-500/10 hover:bg-red-500/20 disabled:opacity-60"
+                              onClick={async () => {
+                                if (!confirm(`Delete resource "${r.label}" ?`)) return;
+                                try {
+                                  await deleteResource(r.id);
+                                  await load();
+                                } catch (e) {
+                                  const msg = e?.response?.data?.message || "Delete failed.";
+                                  alert(msg);
+                                }
+                              }}
+                              disabled={isAssigned}
+                              title={isAssigned ? "Unassign it from missions first" : ""}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       </main>
 
-      {showForm && (
-        <ResourceForm
-          onCreated={(r)=> setItems(prev => [r, ...prev])}
-          onClose={()=> setShowForm(false)}
+      {/* Modals */}
+      {editItem && (
+        <ResourceEditModal
+          resource={editItem}
+          onClose={() => setEditItem(null)}
+          onSaved={() => { setEditItem(null); load(); }}
+        />
+      )}
+
+      {assignIds && (
+        <AssignModal
+          resourceIds={assignIds}
+          onClose={() => setAssignIds(null)}
+          onAssigned={() => { setAssignIds(null); load(); }}
+        />
+      )}
+
+      {openCreate && (
+        <ResourceCreateModal
+          onClose={() => setOpenCreate(false)}
+          onCreated={() => { setOpenCreate(false); load(); }}
         />
       )}
     </div>

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { createMission } from "../api/missions";
-import { assignResource } from "../api/assign";
 import { fetchAvailableResources } from "../api/resources";
+import { assignMany } from "../api/assign";
 
 const statuses = [
   { value: "planned", label: "Planned" },
@@ -30,10 +30,13 @@ export default function MissionForm({ onCreated, onClose }) {
     let alive = true;
     (async () => {
       try {
-        const items = await fetchAvailableResources();
-        if (alive) setResources(items);
+        const res = await fetchAvailableResources();
+        // Supporte les 2 formats: {items:[...]} OU [...]
+        const list = Array.isArray(res) ? res : Array.isArray(res?.items) ? res.items : [];
+        if (alive) setResources(list);
       } catch (e) {
         // On n'empêche pas la création si la liste échoue
+        console.warn("Failed to load available resources", e);
       }
     })();
     return () => { alive = false; };
@@ -41,39 +44,48 @@ export default function MissionForm({ onCreated, onClose }) {
 
   async function onSubmit(e) {
     e.preventDefault();
-    setErr(""); setLoading(true);
+    setErr("");
+    setLoading(true);
     try {
-      // 1) Construire la payload mission
+      // 1) Construire la payload mission (le backend attend "date" en ISO)
       const payload = {
-        title,
-        description: description || null,
+        title: title.trim(),
+        description: (description || "").trim() || null,
         status,
-        date: dateLocal ? new Date(dateLocal).toISOString() : null, // <-- converti ici
+        date: dateLocal ? new Date(dateLocal).toISOString() : null,
         lat: lat === "" ? null : Number(lat),
         lon: lon === "" ? null : Number(lon),
-        // created_by: (laisser le backend utiliser le JWT)
+        // created_by: laissé au backend via JWT (g.user_id)
       };
+
+      // Sanity check basique
+      if (!payload.title) {
+        throw new Error("Title is required.");
+      }
+      if ((payload.lat !== null && Number.isNaN(payload.lat)) ||
+          (payload.lon !== null && Number.isNaN(payload.lon))) {
+        throw new Error("Latitude/Longitude must be numbers.");
+      }
 
       // 2) Créer la mission
       const created = await createMission(payload);
 
-      // 3) Assigner en chaîne les ressources sélectionnées (optionnel)
+      // 3) Assigner en bulk les ressources sélectionnées (optionnel)
       if (selectedIds.length > 0) {
-        await Promise.all(
-          selectedIds.map((rid) =>
-            assignResource({
-              mission_id: created.id,
-              resource_id: rid,
-              note: "Assigned at creation",
-            }).catch(() => null) // ne bloque pas tout si une assignation échoue
-          )
-        );
+        const { data, status: httpStatus } = await assignMany(created.id, selectedIds, "Assigned at creation");
+        if (httpStatus === 207 && data?.errors?.length) {
+          console.warn("Partial assignment errors:", data.errors);
+        }
       }
 
       onCreated?.(created);
       onClose?.();
     } catch (error) {
-      setErr(error?.response?.data?.message || "Creation failed.");
+      const apiMsg =
+        error?.response?.data?.message ||
+        error?.message ||
+        "Creation failed.";
+      setErr(apiMsg);
     } finally {
       setLoading(false);
     }
@@ -92,7 +104,9 @@ export default function MissionForm({ onCreated, onClose }) {
             <label className="text-sm text-slate-300">Title</label>
             <input
               className="mt-1 w-full bg-slate-800/60 border border-white/10 rounded-xl px-3 py-2 text-slate-100 outline-none"
-              value={title} onChange={e=>setTitle(e.target.value)} required
+              value={title}
+              onChange={(e)=>setTitle(e.target.value)}
+              required
             />
           </div>
 
@@ -100,7 +114,9 @@ export default function MissionForm({ onCreated, onClose }) {
             <label className="text-sm text-slate-300">Description</label>
             <textarea
               className="mt-1 w-full bg-slate-800/60 border border-white/10 rounded-xl px-3 py-2 text-slate-100 outline-none"
-              rows={3} value={description} onChange={e=>setDescription(e.target.value)}
+              rows={3}
+              value={description}
+              onChange={(e)=>setDescription(e.target.value)}
             />
           </div>
 
@@ -109,9 +125,12 @@ export default function MissionForm({ onCreated, onClose }) {
               <label className="text-sm text-slate-300">Status</label>
               <select
                 className="mt-1 w-full bg-slate-800/60 border border-white/10 rounded-xl px-3 py-2 text-slate-100 outline-none"
-                value={status} onChange={e=>setStatus(e.target.value)}
+                value={status}
+                onChange={(e)=>setStatus(e.target.value)}
               >
-                {statuses.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                {statuses.map(s => (
+                  <option key={s.value} value={s.value}>{s.label}</option>
+                ))}
               </select>
             </div>
 
@@ -120,7 +139,8 @@ export default function MissionForm({ onCreated, onClose }) {
               <input
                 type="datetime-local"
                 className="mt-1 w-full bg-slate-800/60 border border-white/10 rounded-xl px-3 py-2 text-slate-100 outline-none"
-                value={dateLocal} onChange={e=>setDateLocal(e.target.value)}
+                value={dateLocal}
+                onChange={(e)=>setDateLocal(e.target.value)}
               />
             </div>
           </div>
@@ -143,7 +163,9 @@ export default function MissionForm({ onCreated, onClose }) {
                 </option>
               ))}
             </select>
-            <p className="text-[12px] text-slate-500 mt-1">Maintiens Ctrl/Cmd pour multi-sélectionner.</p>
+            <p className="text-[12px] text-slate-500 mt-1">
+              Maintiens Ctrl/Cmd pour multi-sélectionner.
+            </p>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -152,7 +174,8 @@ export default function MissionForm({ onCreated, onClose }) {
               <input
                 className="mt-1 w-full bg-slate-800/60 border border-white/10 rounded-xl px-3 py-2 text-slate-100 outline-none"
                 type="number" step="0.0001" placeholder="44.843"
-                value={lat} onChange={e=>setLat(e.target.value)}
+                value={lat}
+                onChange={(e)=>setLat(e.target.value)}
               />
             </div>
             <div>
@@ -160,7 +183,8 @@ export default function MissionForm({ onCreated, onClose }) {
               <input
                 className="mt-1 w-full bg-slate-800/60 border border-white/10 rounded-xl px-3 py-2 text-slate-100 outline-none"
                 type="number" step="0.0001" placeholder="-0.555"
-                value={lon} onChange={e=>setLon(e.target.value)}
+                value={lon}
+                onChange={(e)=>setLon(e.target.value)}
               />
             </div>
           </div>
@@ -173,13 +197,15 @@ export default function MissionForm({ onCreated, onClose }) {
 
           <div className="flex justify-end gap-2 pt-2">
             <button
-              type="button" onClick={onClose}
+              type="button"
+              onClick={onClose}
               className="px-4 py-2 rounded-xl border border-white/10 bg-slate-800/40 text-slate-200"
             >
               Cancel
             </button>
             <button
-              type="submit" disabled={loading}
+              type="submit"
+              disabled={loading}
               className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium disabled:opacity-60"
             >
               {loading ? "Creating…" : "Create Mission"}

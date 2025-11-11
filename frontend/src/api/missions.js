@@ -27,3 +27,10 @@ export async function updateMission(id, patch) {
 export async function deleteMission(id) {
   await api.delete(`/missions/${id}`);
 }
+
+export async function fetchMissionsLite() {
+  const { data } = await api.get("/missions", { params: { page: 1, limit: 200 } });
+  const items = Array.isArray(data) ? data : (data.items ?? []);
+  // retourne juste {id,title}
+  return items.map(m => ({ id: m.id, title: m.title }));
+}

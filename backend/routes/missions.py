@@ -4,7 +4,8 @@ from http import HTTPStatus
 from sqlalchemy.exc import IntegrityError
 from datetime import datetime
 from typing import Optional
-
+from models.mission_resource import MissionResource
+from models.resource import Resource, ResourceStatus
 from authz import require_auth, require_roles
 from models.mission import Mission, Status
 from services.assign_service import AssignService
@@ -244,13 +245,32 @@ def delete_mission(mid):
         return jsonify({"error": "not_found"}), 404
 
     try:
+        # 1) Récupérer les ressources liées AVANT la suppression (car CASCADE va enlever les liens)
+        linked_rids = [
+            rid for (rid,) in g.db.query(MissionResource.resource_id)
+            .filter(MissionResource.mission_id == mid)
+            .all()
+        ]
+
+        # 2) Supprimer la mission (les liens mission_resources sautent via ondelete='CASCADE')
         g.db.delete(m)
         g.db.flush()
+
+        # 3) Mettre les ressources en AVAILABLE si elles ne sont plus liées à aucune mission
+        if linked_rids:
+            for rid in set(linked_rids):
+                still_linked = g.db.query(MissionResource).filter_by(resource_id=rid).first()
+                if not still_linked:
+                    res = g.db.get(Resource, rid)
+                    if res and res.status == ResourceStatus.ASSIGNED:
+                        res.status = ResourceStatus.AVAILABLE
+            g.db.flush()
+
+        return jsonify({"ok": True}), 200
+
     except Exception:
         g.db.rollback()
         return jsonify({"error": "internal_error"}), 500
-
-    return jsonify({"ok": True}), 200
 
 
 
@@ -258,29 +278,80 @@ def delete_mission(mid):
 @require_roles("admin", "coordinator")
 def assign_resource_alias(mid):
     """
-    Body: { "resource_id": "...", "note": "..."? }
-    -> Réutilise la logique du service d'assignation.
+    Body (single):
+      { "resource_id": "uuid", "note": "..."? }
+
+    Body (bulk):
+      { "resource_ids": ["uuid1","uuid2",...], "note": "..."? }
+
+    Réponses:
+      - 201 Created (single OK)
+      - 207 Multi-Status (bulk: partiellement OK)
+      - 400 Bad Request (aucun id fourni)
+      - 404/409 selon erreurs renvoyées par AssignService
     """
     try:
         data = request.get_json(force=True) or {}
     except Exception:
         return jsonify({"error": "bad_request", "message": "Payload JSON invalide"}), 400
 
-    resource_id = (data.get("resource_id") or "").strip()
     note = data.get("note")
+    one_id = (data.get("resource_id") or "").strip()
+    many_ids = data.get("resource_ids")
 
-    if not resource_id:
-        return jsonify({"error": "bad_request", "message": "resource_id requis"}), 400
+    # Normalisation : on accepte soit resource_id, soit resource_ids
+    ids = []
+    if one_id:
+        ids = [one_id]
+    elif isinstance(many_ids, list):
+        ids = [str(x).strip() for x in many_ids if str(x).strip()]
+    else:
+        return jsonify({"error": "bad_request", "message": "resource_id ou resource_ids requis"}), 400
 
+    assigned, errors = [], []
+    for rid in ids:
+        try:
+            link = AssignService.create_assignment(g.db, mission_id=mid, resource_id=rid, note=note)
+            assigned.append(link.to_dict())
+        except ValueError as e:
+            code = str(e)
+            if code == "not_found_mission":
+                errors.append({"resource_id": rid, "error": code, "message": "Mission introuvable"})
+            elif code == "not_found_resource":
+                errors.append({"resource_id": rid, "error": code, "message": "Ressource introuvable"})
+            elif code == "duplicate_assignment":
+                errors.append({"resource_id": rid, "error": code, "message": "Déjà assignée à cette mission"})
+            else:
+                errors.append({"resource_id": rid, "error": "unknown", "message": "Erreur interne"})
+
+    if len(ids) == 1:
+        # Cas single : 201 si ok, sinon premier code d'erreur adapté
+        if assigned:
+            return jsonify(assigned[0]), HTTPStatus.CREATED
+        # Sinon renvoyer le premier message d'erreur le plus parlant
+        err = errors[0]
+        msg = err.get("message", "Erreur")
+        code = err.get("error", "bad_request")
+        http = 404 if code in ("not_found_mission","not_found_resource") else (409 if code == "duplicate_assignment" else 400)
+        return jsonify({"error": code, "message": msg}), http
+
+    # Cas bulk : retourner un 207 Multi-Status
+    status_code = 207 if errors and assigned else (HTTPStatus.CREATED if assigned and not errors else 400)
+    return jsonify({"assigned": assigned, "errors": errors}), status_code
+
+
+# --- UNASSIGN (optionnel mais utile) -----------------------------------------
+@missions_bp.route("/<mid>/assign/<link_id>", methods=["DELETE"])
+@require_roles("admin", "coordinator")
+def unassign_resource_alias(mid, link_id):
+    """
+    DELETE /missions/<mid>/assign/<link_id>
+    Retire un lien mission↔ressource et rafraîchit le statut ressource.
+    """
     try:
-        link = AssignService.create_assignment(g.db, mission_id=mid, resource_id=resource_id, note=note)
-        return jsonify(link.to_dict()), HTTPStatus.CREATED
+        ok = AssignService.delete_assignment(g.db, link_id)
+        return jsonify({"ok": bool(ok)}), 200
     except ValueError as e:
-        code = str(e)
-        if code == "not_found_mission":
-            return jsonify({"error": code, "message": "Mission introuvable"}), 404
-        if code == "not_found_resource":
-            return jsonify({"error": code, "message": "Ressource introuvable"}), 404
-        if code == "duplicate_assignment":
-            return jsonify({"error": code, "message": "Ressource déjà assignée à cette mission"}), 409
+        if str(e) == "not_found_link":
+            return jsonify({"error": "not_found"}), 404
         return jsonify({"error": "internal_error"}), 500
