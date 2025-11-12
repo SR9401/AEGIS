@@ -87,17 +87,17 @@ export default function Landing() {
           <Feature
             title="Mission Planning"
             desc="Create missions with status, schedule, and geolocation."
-            media="/feature-missions.png"  // TODO: ajoute une capture/gif dans public/
+            media="public/missionview.png"  // TODO: ajoute une capture/gif dans public/
           />
           <Feature
             title="Resource Assignment"
             desc="Assign available assets and keep track of capacity."
-            media="/feature-resources.png" // TODO
+            media="public/resourcesas.png" // TODO
           />
           <Feature
             title="Map & Weather"
             desc="Visualize missions on the map and display local weather."
-            media="/feature-map-weather.gif" // TODO
+            media="public/map&weather.png" // TODO
           />
         </div>
       </section>
@@ -139,8 +139,6 @@ export default function Landing() {
       <section id="deliverables" className="mx-auto max-w-7xl px-4 py-16">
         <h2 className='text-2xl md:text-3xl font-bold font-["Cinzel",serif]'>Deliverables</h2>
         <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4 text-slate-300">
-          <CardLink label="Landing Page URL" href={DEPLOY_URL} />
-          {/* <CardLink label="YouTube Demo Video" href={YT_DEMO_URL} />*/}
           <CardLink label="GitHub Repository" href={GITHUB_URL} />
           {/*<CardLink label="Trello Board" href={TRELLO_URL} />*/}
         </div>

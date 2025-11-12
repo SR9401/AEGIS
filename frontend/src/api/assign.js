@@ -7,7 +7,7 @@ export async function assignOne(mid, resourceId, note) {
     resource_id: resourceId,
     note: note || undefined,
   });
-  return data; // <- objet MissionResource
+  return data;
 }
 
 // BULK assign: { resource_ids: [], note? } => 201 ou 207 (assigned[], errors[])
